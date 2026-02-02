@@ -15,19 +15,21 @@
 #include "esp_log.h"
 #include "lvgl.h"
 #include "lvgl_port.h"
+#include "lvgl__lvgl/src/widgets/lottie/lv_lottie.h"
+#include "lottie_animation.h"
 
 static const char *TAG = "main";
 
-static lv_obj_t *lottie_obj = NULL;
-
-// Commented out until Lottie is properly configured
-/*
-static void create_lottie_demo(void)
+static void lottie_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Creating Lottie animation demo");
     
+    // Give LVGL time to initialize
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
     if (!lvgl_port_lock(0)) {
         ESP_LOGE(TAG, "Failed to lock LVGL");
+        vTaskDelete(NULL);
         return;
     }
     
@@ -35,7 +37,7 @@ static void create_lottie_demo(void)
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x003a57), LV_PART_MAIN);
     
     // Create Lottie widget (300x300 as in JSON)
-    lottie_obj = lv_lottie_create(scr);
+    lv_obj_t *lottie_obj = lv_lottie_create(scr);
     lv_obj_center(lottie_obj);
     
     // Allocate buffer for Lottie animation (ARGB8888 = 4 bytes per pixel)
@@ -44,17 +46,30 @@ static void create_lottie_demo(void)
     if (!lottie_buf) {
         ESP_LOGE(TAG, "Failed to allocate Lottie buffer");
         lvgl_port_unlock();
+        vTaskDelete(NULL);
         return;
     }
     
     lv_lottie_set_buffer(lottie_obj, 300, 300, lottie_buf);
-    lv_lottie_set_src_file(lottie_obj, "/spiffs/cute_bird.json");
+    
+    // Load Lottie animation from embedded data (not from file)
+    lv_lottie_set_src_data(lottie_obj, lottie_animation_json, lottie_animation_json_size);
+    
+    // Pause animation to reduce stack usage during rendering
+    // ThorVG RLE rendering is very stack-intensive with continuous frame updates
+    lv_anim_t *a = lv_lottie_get_anim(lottie_obj);
+    if (a) {
+        lv_anim_pause(a);
+        ESP_LOGI(TAG, "Animation paused to reduce stack usage during rendering");
+    }
     
     lvgl_port_unlock();
     
     ESP_LOGI(TAG, "Lottie animation created successfully");
+    
+    // Task completed, delete self
+    vTaskDelete(NULL);
 }
-*/
 
 void app_main(void)
 {
@@ -89,10 +104,11 @@ void app_main(void)
     ESP_LOGI(TAG, "Initializing LVGL...");
     ESP_ERROR_CHECK(lvgl_port_init());
     
-    // Create Lottie demo (commented out until Lottie is properly configured)
-    // create_lottie_demo();
+    // Create Lottie animation demo in a dedicated task with larger stack
+    // ThorVG vector rendering requires significant stack space (recursive algorithms)
+    xTaskCreate(lottie_task, "lottie_task", 32768, NULL, 5, NULL);
     
-    ESP_LOGI(TAG, "System ready - Lottie demo disabled for now");
+    ESP_LOGI(TAG, "System ready");
     
     // Keep the app running and display memory info
     while (1) {
