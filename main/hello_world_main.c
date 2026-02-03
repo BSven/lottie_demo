@@ -16,7 +16,10 @@
 #include "lvgl.h"
 #include "lvgl_port.h"
 #include "lvgl__lvgl/src/widgets/lottie/lv_lottie.h"
-#include "lottie_animation.h"
+
+// External Lottie data from circle_lottie.c
+extern const uint8_t circle_lottie_data[];
+extern const uint32_t circle_lottie_data_size;
 
 #if CONFIG_LV_USE_SYSMON
 #include "lvgl__lvgl/src/others/sysmon/lv_sysmon.h"
@@ -73,12 +76,12 @@ void app_main(void)
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x003a57), LV_PART_MAIN);
     
-    // Create Lottie widget (300x300 as in JSON)
+    // Create Lottie object and set larger size
     lv_obj_t *lottie_obj = lv_lottie_create(scr);
+    lv_obj_set_size(lottie_obj, 300, 300);
     lv_obj_center(lottie_obj);
     
-    // Allocate buffer for Lottie animation (ARGB8888 = 4 bytes per pixel)
-    size_t buf_size = 300 * 300 * 4;
+    size_t buf_size = 300 * 300 * 4;  // RGBA format
     void *lottie_buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
     if (!lottie_buf) {
         ESP_LOGE(TAG, "Failed to allocate Lottie buffer");
@@ -86,8 +89,11 @@ void app_main(void)
         return;
     }
     
+    ESP_LOGI(TAG, "Allocated %zu bytes for full-screen Lottie buffer in PSRAM", buf_size);
+    
+    // Set buffer and load circle Lottie animation
     lv_lottie_set_buffer(lottie_obj, 300, 300, lottie_buf);
-    lv_lottie_set_src_data(lottie_obj, lottie_animation_json, lottie_animation_json_size);
+    lv_lottie_set_src_data(lottie_obj, (const char*)circle_lottie_data, circle_lottie_data_size);
     
     lvgl_port_unlock();
     
