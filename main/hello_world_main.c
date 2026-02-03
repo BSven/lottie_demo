@@ -55,14 +55,6 @@ static void lottie_task(void *pvParameters)
     // Load Lottie animation from embedded data (not from file)
     lv_lottie_set_src_data(lottie_obj, lottie_animation_json, lottie_animation_json_size);
     
-    // Pause animation to reduce stack usage during rendering
-    // ThorVG RLE rendering is very stack-intensive with continuous frame updates
-    lv_anim_t *a = lv_lottie_get_anim(lottie_obj);
-    if (a) {
-        lv_anim_pause(a);
-        ESP_LOGI(TAG, "Animation paused to reduce stack usage during rendering");
-    }
-    
     lvgl_port_unlock();
     
     ESP_LOGI(TAG, "Lottie animation created successfully");
