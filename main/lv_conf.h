@@ -18,7 +18,9 @@
 #define LV_DEF_REFR_PERIOD 33
 
 /* Enable features */
+#define LV_USE_SYSMON 1
 #define LV_USE_PERF_MONITOR 1
+#define LV_USE_PERF_MONITOR_LOG_MODE 1
 #define LV_USE_MEM_MONITOR 1
 #define LV_USE_LOG 1
 #define LV_LOG_LEVEL LV_LOG_LEVEL_INFO

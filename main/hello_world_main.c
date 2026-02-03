@@ -18,6 +18,10 @@
 #include "lvgl__lvgl/src/widgets/lottie/lv_lottie.h"
 #include "lottie_animation.h"
 
+#if CONFIG_LV_USE_SYSMON
+#include "lvgl__lvgl/src/others/sysmon/lv_sysmon.h"
+#endif
+
 static const char *TAG = "main";
 
 static void lottie_task(void *pvParameters)
@@ -51,9 +55,13 @@ static void lottie_task(void *pvParameters)
     }
     
     lv_lottie_set_buffer(lottie_obj, 300, 300, lottie_buf);
-    
-    // Load Lottie animation from embedded data (not from file)
     lv_lottie_set_src_data(lottie_obj, lottie_animation_json, lottie_animation_json_size);
+    
+    // Limit animation speed to reduce CPU load
+    //lv_anim_t *anim = lv_lottie_get_anim(lottie_obj);
+    //if (anim) {
+    //    lv_anim_set_playback_delay(anim, 30); // 30ms delay between frames (~33 FPS)
+    //}
     
     lvgl_port_unlock();
     
@@ -104,7 +112,7 @@ void app_main(void)
     
     // Keep the app running and display memory info
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(1000));
         printf("Free heap: %" PRIu32 " bytes\n", esp_get_free_heap_size());
     }
 }
