@@ -258,11 +258,11 @@ esp_err_t lvgl_port_init(void)
     lv_display_set_flush_cb(lvgl_disp, lvgl_flush_cb);
     lv_display_set_user_data(lvgl_disp, panel_handle);
     
-    // Allocate draw buffers in PSRAM
+    // Allocate draw buffers in internal RAM for maximum performance
     size_t buffer_size = LCD_H_RES * LVGL_BUFFER_HEIGHT * sizeof(lv_color16_t);
-    void *buf1 = heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM);
+    void *buf1 = heap_caps_malloc(buffer_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     assert(buf1);
-    void *buf2 = heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM);
+    void *buf2 = heap_caps_malloc(buffer_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     assert(buf2);
     lv_display_set_buffers(lvgl_disp, buf1, buf2, buffer_size, LV_DISPLAY_RENDER_MODE_PARTIAL);
     

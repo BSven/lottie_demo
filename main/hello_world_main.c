@@ -24,53 +24,6 @@
 
 static const char *TAG = "main";
 
-static void lottie_task(void *pvParameters)
-{
-    ESP_LOGI(TAG, "Creating Lottie animation demo");
-    
-    // Give LVGL time to initialize
-    vTaskDelay(pdMS_TO_TICKS(100));
-    
-    if (!lvgl_port_lock(0)) {
-        ESP_LOGE(TAG, "Failed to lock LVGL");
-        vTaskDelete(NULL);
-        return;
-    }
-    
-    lv_obj_t *scr = lv_screen_active();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x003a57), LV_PART_MAIN);
-    
-    // Create Lottie widget (300x300 as in JSON)
-    lv_obj_t *lottie_obj = lv_lottie_create(scr);
-    lv_obj_center(lottie_obj);
-    
-    // Allocate buffer for Lottie animation (ARGB8888 = 4 bytes per pixel)
-    size_t buf_size = 300 * 300 * 4;
-    void *lottie_buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
-    if (!lottie_buf) {
-        ESP_LOGE(TAG, "Failed to allocate Lottie buffer");
-        lvgl_port_unlock();
-        vTaskDelete(NULL);
-        return;
-    }
-    
-    lv_lottie_set_buffer(lottie_obj, 300, 300, lottie_buf);
-    lv_lottie_set_src_data(lottie_obj, lottie_animation_json, lottie_animation_json_size);
-    
-    // Limit animation speed to reduce CPU load
-    //lv_anim_t *anim = lv_lottie_get_anim(lottie_obj);
-    //if (anim) {
-    //    lv_anim_set_playback_delay(anim, 30); // 30ms delay between frames (~33 FPS)
-    //}
-    
-    lvgl_port_unlock();
-    
-    ESP_LOGI(TAG, "Lottie animation created successfully");
-    
-    // Task completed, delete self
-    vTaskDelete(NULL);
-}
-
 void app_main(void)
 {
     printf("Hello world!\n");
@@ -104,11 +57,41 @@ void app_main(void)
     ESP_LOGI(TAG, "Initializing LVGL...");
     ESP_ERROR_CHECK(lvgl_port_init());
     
-    // Create Lottie animation demo in a dedicated task with larger stack
-    // ThorVG vector rendering requires significant stack space (recursive algorithms)
-    xTaskCreate(lottie_task, "lottie_task", 32768, NULL, 5, NULL);
-    
     ESP_LOGI(TAG, "System ready");
+    
+    // Give LVGL time to initialize
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // Create Lottie animation demo
+    ESP_LOGI(TAG, "Creating Lottie animation demo");
+    
+    if (!lvgl_port_lock(0)) {
+        ESP_LOGE(TAG, "Failed to lock LVGL");
+        return;
+    }
+    
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x003a57), LV_PART_MAIN);
+    
+    // Create Lottie widget (300x300 as in JSON)
+    lv_obj_t *lottie_obj = lv_lottie_create(scr);
+    lv_obj_center(lottie_obj);
+    
+    // Allocate buffer for Lottie animation (ARGB8888 = 4 bytes per pixel)
+    size_t buf_size = 300 * 300 * 4;
+    void *lottie_buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    if (!lottie_buf) {
+        ESP_LOGE(TAG, "Failed to allocate Lottie buffer");
+        lvgl_port_unlock();
+        return;
+    }
+    
+    lv_lottie_set_buffer(lottie_obj, 300, 300, lottie_buf);
+    lv_lottie_set_src_data(lottie_obj, lottie_animation_json, lottie_animation_json_size);
+    
+    lvgl_port_unlock();
+    
+    ESP_LOGI(TAG, "Lottie animation created successfully");
     
     // Keep the app running and display memory info
     while (1) {
