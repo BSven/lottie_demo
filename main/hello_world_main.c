@@ -1,6 +1,6 @@
 /*
- * LVGL Animation - Matching Lottie circle_lottie.json behavior
- * Pulsing circle (scale 50% → 100% → 50%) - identical to Lottie
+ * LVGL Lottie Animation Demo
+ * Playing circle_lottie.json using LVGL's built-in Lottie support
  */
 
 #include <stdio.h>
@@ -12,78 +12,57 @@
 #include "esp_flash.h"
 #include "esp_system.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "lvgl.h"
 #include "lvgl_port.h"
 
-static const char *TAG = "lottie_anim";
+/* Include the Lottie animation data */
+#include "assets/circle_lottie.c"
 
-/* Circle object */
-static lv_obj_t *circle = NULL;
+static const char *TAG = "lottie_demo";
 
-/*
- * Lottie animation analysis:
- * - Canvas: 300x300
- * - Circle: 100x100 ellipse at center (150, 150)
- * - Scale keyframes:
- *   - t=0:  50% (circle is 50x50)
- *   - t=30: 100% (circle is 100x100)  
- *   - t=60: 50% (circle is 50x50)
- * - Duration: 60 frames @ 30fps = 2000ms
- * - Easing: ease-in-out (cubic bezier)
- *
- * For 720x720 display, scale factor = 720/300 = 2.4
- * Base circle size: 100 * 2.4 = 240px at 100%
- * At 50%: 120px, at 100%: 240px
- */
+/* Lottie animation object */
+static lv_obj_t *lottie_obj = NULL;
 
-#define CIRCLE_SIZE_MIN  120   /* 50% of base (240 * 0.5) */
-#define CIRCLE_SIZE_MAX  240   /* 100% of base */
-#define ANIM_DURATION_MS 2000  /* Full cycle: 2 seconds */
+/* Buffer for Lottie rendering (ARGB8888 format, 4 bytes per pixel) */
+/* Lottie canvas: 300x300 - allocated in PSRAM due to size */
+#define LOTTIE_WIDTH  300
+#define LOTTIE_HEIGHT 300
+static uint8_t *lottie_buf = NULL;
 
-/* Animation callback - directly set circle size and re-center */
-static void anim_size_cb(void *var, int32_t size)
+/* Create Lottie animation */
+static void create_lottie_animation(void)
 {
-    lv_obj_t *obj = (lv_obj_t *)var;
-    lv_obj_set_size(obj, size, size);
-    lv_obj_center(obj);
-}
-
-/* Create animated circle matching Lottie behavior exactly */
-static void create_lottie_circle(void)
-{
-    /* Create circle on active screen */
-    circle = lv_obj_create(lv_screen_active());
-    lv_obj_remove_style_all(circle);
+    /* Allocate buffer in PSRAM (SPIRAM) due to large size */
+    size_t buf_size = LOTTIE_WIDTH * LOTTIE_HEIGHT * 4;
+    lottie_buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (lottie_buf == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate Lottie buffer in PSRAM");
+        return;
+    }
+    ESP_LOGI(TAG, "Lottie buffer allocated: %d bytes in PSRAM", buf_size);
     
-    /* Lottie color: [0.2, 0.7, 1, 1] = RGB(51, 179, 255) */
-    lv_obj_set_style_radius(circle, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(circle, lv_color_make(51, 179, 255), 0);
-    lv_obj_set_style_bg_opa(circle, LV_OPA_COVER, 0);
+    /* Create Lottie widget */
+    lottie_obj = lv_lottie_create(lv_screen_active());
     
-    /* Start at minimum size (50%) */
-    lv_obj_set_size(circle, CIRCLE_SIZE_MIN, CIRCLE_SIZE_MIN);
-    lv_obj_center(circle);
+    /* Set buffer for rendering */
+    lv_lottie_set_buffer(lottie_obj, LOTTIE_WIDTH, LOTTIE_HEIGHT, lottie_buf);
     
-    /* 
-     * Scale animation: 50% → 100% → 50%
-     * - First half (0-1000ms): grow from 120px to 240px
-     * - Second half (1000-2000ms): shrink from 240px to 120px
-     * - Easing: ease-in-out (matches Lottie cubic bezier)
-     */
-    lv_anim_t anim;
-    lv_anim_init(&anim);
-    lv_anim_set_var(&anim, circle);
-    lv_anim_set_exec_cb(&anim, anim_size_cb);
-    lv_anim_set_values(&anim, CIRCLE_SIZE_MIN, CIRCLE_SIZE_MAX);
-    lv_anim_set_duration(&anim, ANIM_DURATION_MS / 2);  /* 1000ms to grow */
-    lv_anim_set_playback_duration(&anim, ANIM_DURATION_MS / 2);  /* 1000ms to shrink */
-    lv_anim_set_repeat_count(&anim, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_path_cb(&anim, lv_anim_path_ease_in_out);
-    lv_anim_start(&anim);
+    /* Set the animation data */
+    lv_lottie_set_src_data(lottie_obj, circle_lottie_data, circle_lottie_data_size);
     
-    ESP_LOGI(TAG, "Lottie-identical circle animation started");
-    ESP_LOGI(TAG, "  Size: %dpx (50%%) to %dpx (100%%)", CIRCLE_SIZE_MIN, CIRCLE_SIZE_MAX);
-    ESP_LOGI(TAG, "  Duration: %dms cycle", ANIM_DURATION_MS);
+    /* Center on screen */
+    lv_obj_center(lottie_obj);
+    
+    /* Get the animation and configure it */
+    lv_anim_t *anim = lv_lottie_get_anim(lottie_obj);
+    if (anim) {
+        lv_anim_set_repeat_count(anim, LV_ANIM_REPEAT_INFINITE);
+    }
+    
+    ESP_LOGI(TAG, "Lottie animation created");
+    ESP_LOGI(TAG, "  Size: %dx%d", LOTTIE_WIDTH, LOTTIE_HEIGHT);
+    ESP_LOGI(TAG, "  Data size: %" PRIu32 " bytes", circle_lottie_data_size);
 }
 
 void app_main(void)
@@ -124,20 +103,20 @@ void app_main(void)
     // Give LVGL time to initialize
     vTaskDelay(pdMS_TO_TICKS(100));
     
-    // Create Lottie-style animation
-    ESP_LOGI(TAG, "Creating Lottie-identical circle animation...");
+    // Create Lottie animation
+    ESP_LOGI(TAG, "Creating Lottie animation...");
     
     if (!lvgl_port_lock(0)) {
         ESP_LOGE(TAG, "Failed to lock LVGL");
         return;
     }
     
-    /* Create pulsing circle - identical to Lottie */
-    create_lottie_circle();
+    /* Create Lottie animation from JSON data */
+    create_lottie_animation();
     
     lvgl_port_unlock();
     
-    ESP_LOGI(TAG, "Animation running...");
+    ESP_LOGI(TAG, "Lottie animation running...");
     
     // Keep the app running
     while (1) {
