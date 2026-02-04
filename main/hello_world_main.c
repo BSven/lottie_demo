@@ -1,6 +1,6 @@
 /*
  * LVGL Lottie Animation Demo
- * Playing circle_lottie.json using LVGL's built-in Lottie support
+ * Playing cute_bird.json using LVGL's built-in Lottie support
  */
 
 #include <stdio.h>
@@ -17,7 +17,7 @@
 #include "lvgl_port.h"
 
 /* Include the Lottie animation data */
-#include "assets/circle_lottie.c"
+#include "assets/cute_bird.c"
 
 static const char *TAG = "lottie_demo";
 
@@ -49,7 +49,7 @@ static void create_lottie_animation(void)
     lv_lottie_set_buffer(lottie_obj, LOTTIE_WIDTH, LOTTIE_HEIGHT, lottie_buf);
     
     /* Set the animation data */
-    lv_lottie_set_src_data(lottie_obj, circle_lottie_data, circle_lottie_data_size);
+    lv_lottie_set_src_data(lottie_obj, cute_bird_lottie_data, cute_bird_lottie_data_size);
     
     /* Center on screen */
     lv_obj_center(lottie_obj);
@@ -62,7 +62,7 @@ static void create_lottie_animation(void)
     
     ESP_LOGI(TAG, "Lottie animation created");
     ESP_LOGI(TAG, "  Size: %dx%d", LOTTIE_WIDTH, LOTTIE_HEIGHT);
-    ESP_LOGI(TAG, "  Data size: %" PRIu32 " bytes", circle_lottie_data_size);
+    ESP_LOGI(TAG, "  Data size: %" PRIu32 " bytes", cute_bird_lottie_data_size);
 }
 
 void app_main(void)
