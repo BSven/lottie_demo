@@ -18,6 +18,7 @@
 #include "esp_ldo_regulator.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_task_wdt.h"
 #include "lvgl.h"
 #include "esp_lcd_touch_gt911.h"
 
@@ -258,13 +259,25 @@ esp_err_t lvgl_port_init(void)
     lv_display_set_flush_cb(lvgl_disp, lvgl_flush_cb);
     lv_display_set_user_data(lvgl_disp, panel_handle);
     
-    // Allocate draw buffers in internal RAM for maximum performance
-    size_t buffer_size = LCD_H_RES * LVGL_BUFFER_HEIGHT * sizeof(lv_color16_t);
-    void *buf1 = heap_caps_malloc(buffer_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    // Use full-screen buffers in PSRAM for FULL rendering mode (no partial updates)
+    // Full screen: 720x720 pixels * 2 bytes = 1,036,800 bytes per buffer
+    size_t buffer_size = LCD_H_RES * LCD_V_RES * sizeof(lv_color16_t);
+    ESP_LOGI(TAG, "Allocating LVGL full-screen buffers: %zu bytes per buffer (%.2f MB total)", 
+             buffer_size, (buffer_size * 2) / (1024.0f * 1024.0f));
+    
+    // CRITICAL: Use aligned allocation! LV_DRAW_BUF_ALIGN is 64 bytes.
+    // heap_caps_malloc does NOT guarantee alignment, causing LVGL assertion loops.
+    void *buf1 = heap_caps_aligned_alloc(64, buffer_size, MALLOC_CAP_SPIRAM);
     assert(buf1);
-    void *buf2 = heap_caps_malloc(buffer_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    void *buf2 = heap_caps_aligned_alloc(64, buffer_size, MALLOC_CAP_SPIRAM);
     assert(buf2);
-    lv_display_set_buffers(lvgl_disp, buf1, buf2, buffer_size, LV_DISPLAY_RENDER_MODE_PARTIAL);
+    
+    ESP_LOGI(TAG, "LVGL buffers allocated in PSRAM (64-byte aligned): buf1=%p, buf2=%p", buf1, buf2);
+    
+    // Use the simple API that doesn't do memset - just pass the buffers directly
+    lv_display_set_buffers(lvgl_disp, buf1, buf2, buffer_size, LV_DISPLAY_RENDER_MODE_FULL);
+    
+    ESP_LOGI(TAG, "LVGL display buffers initialized");
     
     // Create LVGL input device (touch)
     ESP_LOGI(TAG, "Create LVGL input device");
