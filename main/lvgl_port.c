@@ -50,13 +50,14 @@ void lvgl_port_unlock(void)
     xSemaphoreGiveRecursive(lvgl_mux);
 }
 
-// LVGL Flush Callback - FULL mode: entire screen is redrawn each frame
+// LVGL Flush Callback - FULL mode with double-buffering
+// In FULL mode, the entire screen is redrawn each frame - no ghosting artifacts
 static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
     esp_lcd_panel_handle_t panel = lv_display_get_user_data(disp);
     
-    // FULL mode: draw the entire buffer to panel (area covers full screen)
-    esp_lcd_panel_draw_bitmap(panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, px_map);
+    // FULL mode: trigger buffer swap, the DPI panel will display this buffer
+    esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_H_RES, LCD_V_RES, px_map);
     
     lv_display_flush_ready(disp);
 }
@@ -269,10 +270,11 @@ esp_err_t lvgl_port_init(void)
     ESP_LOGI(TAG, "Using DPI panel framebuffers: fb0=%p, fb1=%p, size=%zu bytes", 
              fb0, fb1, buffer_size);
     
-    // FULL mode: entire screen redrawn each frame - stable, no tearing
+    // FULL mode: entire screen redrawn each frame - no ghosting, stable rendering
+    // Double-buffering: tear-free display, one buffer displayed while other is drawn
     lv_display_set_buffers(lvgl_disp, fb0, fb1, buffer_size, LV_DISPLAY_RENDER_MODE_FULL);
     
-    ESP_LOGI(TAG, "LVGL display initialized with FULL mode");
+    ESP_LOGI(TAG, "LVGL display initialized with FULL mode (double-buffered)");
     
     // Create LVGL input device (touch)
     ESP_LOGI(TAG, "Create LVGL input device");
@@ -290,10 +292,10 @@ esp_err_t lvgl_port_init(void)
     ESP_ERROR_CHECK(esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_tick_timer, LVGL_TICK_PERIOD_MS * 1000));
     
-    // Create LVGL task
-    xTaskCreate(lvgl_port_task, "LVGL", LVGL_TASK_STACK_SIZE, NULL, LVGL_TASK_PRIORITY, NULL);
+    // Create LVGL task pinned to Core 1 (Core 0 is used by main task and system)
+    xTaskCreatePinnedToCore(lvgl_port_task, "LVGL", LVGL_TASK_STACK_SIZE, NULL, LVGL_TASK_PRIORITY, NULL, 1);
     
-    ESP_LOGI(TAG, "LVGL initialization complete");
+    ESP_LOGI(TAG, "LVGL initialization complete (running on Core 1)");
     return ESP_OK;
 }
 

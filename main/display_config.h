@@ -43,10 +43,10 @@
 #define TOUCH_I2C_RST          5  // Shared with LCD reset
 
 // LVGL Settings
-#define LVGL_TICK_PERIOD_MS    2
-#define LVGL_TASK_MAX_DELAY_MS 500
+#define LVGL_TICK_PERIOD_MS    1
+#define LVGL_TASK_MAX_DELAY_MS 10
 #define LVGL_TASK_MIN_DELAY_MS 1
 #define LVGL_TASK_STACK_SIZE   (32 * 1024)  // Increased for ThorVG Lottie rendering (was 4KB, now 32KB)
-#define LVGL_TASK_PRIORITY     2
+#define LVGL_TASK_PRIORITY     5            // Higher priority for smoother rendering
 
 #endif // DISPLAY_CONFIG_H
