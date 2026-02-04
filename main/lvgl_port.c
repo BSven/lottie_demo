@@ -1,5 +1,6 @@
 /*
  * LVGL Display Port for ESP32-P4-WIFI6-Touch-LCD-4B (720x720 MIPI DSI)
+ * Using ESP-BSP esp_lvgl_port component with avoid_tearing for flicker-free display
  */
 
 #include <stdio.h>
@@ -7,20 +8,19 @@
 #include "display_config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
-#include "esp_timer.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_lcd_st7703.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
-#include "driver/ledc.h"
 #include "esp_ldo_regulator.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "esp_task_wdt.h"
 #include "lvgl.h"
 #include "esp_lcd_touch_gt911.h"
+
+/* ESP-BSP LVGL Port - handles VSync, double-buffering, and avoid_tearing */
+#include "esp_lvgl_port.h"
 
 static const char *TAG = "lvgl_port";
 
@@ -29,84 +29,6 @@ static lv_indev_t *lvgl_touch_indev = NULL;
 static esp_lcd_panel_handle_t panel_handle = NULL;
 static esp_lcd_touch_handle_t touch_handle = NULL;
 static esp_lcd_dsi_bus_handle_t mipi_dsi_bus = NULL;
-
-static SemaphoreHandle_t lvgl_mux = NULL;
-
-// LVGL Tick Timer Callback
-static void lvgl_tick_timer_cb(void *arg)
-{
-    lv_tick_inc(LVGL_TICK_PERIOD_MS);
-}
-
-// LVGL Lock/Unlock
-bool lvgl_port_lock(uint32_t timeout_ms)
-{
-    const TickType_t timeout_ticks = (timeout_ms == 0) ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
-    return xSemaphoreTakeRecursive(lvgl_mux, timeout_ticks) == pdTRUE;
-}
-
-void lvgl_port_unlock(void)
-{
-    xSemaphoreGiveRecursive(lvgl_mux);
-}
-
-// LVGL Flush Callback - FULL mode with double-buffering
-// In FULL mode, the entire screen is redrawn each frame - no ghosting artifacts
-static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
-{
-    esp_lcd_panel_handle_t panel = lv_display_get_user_data(disp);
-    
-    // FULL mode: trigger buffer swap, the DPI panel will display this buffer
-    esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_H_RES, LCD_V_RES, px_map);
-    
-    lv_display_flush_ready(disp);
-}
-
-// Touch Read Callback
-static void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
-{
-    esp_lcd_touch_handle_t touch = lv_indev_get_user_data(indev);
-    esp_lcd_touch_point_data_t touch_points[1];
-    uint8_t touch_cnt = 0;
-    
-    esp_lcd_touch_read_data(touch);
-    
-    esp_err_t ret = esp_lcd_touch_get_data(touch, touch_points, &touch_cnt, 1);
-    
-    if (ret == ESP_OK && touch_cnt > 0) {
-        data->point.x = touch_points[0].x;
-        data->point.y = touch_points[0].y;
-        data->state = LV_INDEV_STATE_PRESSED;
-        
-        // Debug logging for touch coordinates
-        ESP_LOGI(TAG, "Touch input: X=%d, Y=%d", touch_points[0].x, touch_points[0].y);
-    } else {
-        data->state = LV_INDEV_STATE_RELEASED;
-    }
-}
-
-// LVGL Task
-static void lvgl_port_task(void *arg)
-{
-    ESP_LOGI(TAG, "Starting LVGL task");
-    
-    while (1) {
-        uint32_t task_delay_ms = LVGL_TASK_MAX_DELAY_MS;
-        
-        if (lvgl_port_lock(0)) {
-            task_delay_ms = lv_timer_handler();
-            lvgl_port_unlock();
-        }
-        
-        if (task_delay_ms > LVGL_TASK_MAX_DELAY_MS) {
-            task_delay_ms = LVGL_TASK_MAX_DELAY_MS;
-        } else if (task_delay_ms < LVGL_TASK_MIN_DELAY_MS) {
-            task_delay_ms = LVGL_TASK_MIN_DELAY_MS;
-        }
-        
-        vTaskDelay(pdMS_TO_TICKS(task_delay_ms));
-    }
-}
 
 // Enable LDO for DSI PHY power
 static esp_err_t lvgl_enable_dsi_phy_power(void)
@@ -123,7 +45,7 @@ static esp_err_t lvgl_enable_dsi_phy_power(void)
     return ESP_OK;
 }
 
-// Configure backlight using simple GPIO (for testing)
+// Configure backlight using simple GPIO
 static esp_err_t lvgl_backlight_init(void)
 {
     gpio_config_t bk_gpio_config = {
@@ -137,47 +59,58 @@ static esp_err_t lvgl_backlight_init(void)
     return ESP_OK;
 }
 
-esp_err_t lvgl_port_init(void)
+esp_err_t lvgl_display_init(void)
 {
-    ESP_LOGI(TAG, "Initialize LVGL");
+    ESP_LOGI(TAG, "Initialize LVGL using ESP-BSP esp_lvgl_port (avoid_tearing mode)");
     
-    // Create LVGL mutex
-    lvgl_mux = xSemaphoreCreateRecursiveMutex();
-    if (lvgl_mux == NULL) {
-        ESP_LOGE(TAG, "Failed to create LVGL mutex");
-        return ESP_FAIL;
-    }
+    // ==========================================
+    // Step 1: Initialize ESP-BSP LVGL Port
+    // ==========================================
+    const lvgl_port_cfg_t lvgl_cfg = {
+        .task_priority = LVGL_TASK_PRIORITY,
+        .task_stack = LVGL_TASK_STACK_SIZE,
+        .task_affinity = 1,  // Pin to Core 1
+        .task_max_sleep_ms = LVGL_TASK_MAX_DELAY_MS,
+        .timer_period_ms = LVGL_TICK_PERIOD_MS,
+    };
+    ESP_ERROR_CHECK(lvgl_port_init(&lvgl_cfg));
+    ESP_LOGI(TAG, "ESP-BSP LVGL port initialized");
     
-    // Initialize LVGL
-    lv_init();
-    
-    // Configure backlight (PWM)
+    // ==========================================
+    // Step 2: Configure backlight
+    // ==========================================
     ESP_LOGI(TAG, "Initialize backlight");
     ESP_ERROR_CHECK(lvgl_backlight_init());
     
-    // Enable MIPI DSI PHY power
+    // ==========================================
+    // Step 3: Enable MIPI DSI PHY power
+    // ==========================================
     ESP_LOGI(TAG, "Enable DSI PHY power");
     ESP_ERROR_CHECK(lvgl_enable_dsi_phy_power());
     
-    // Create MIPI DSI bus using official ST7703 macro
+    // ==========================================
+    // Step 4: Create MIPI DSI bus
+    // ==========================================
     ESP_LOGI(TAG, "Install MIPI DSI bus");
     esp_lcd_dsi_bus_config_t bus_config = ST7703_PANEL_BUS_DSI_2CH_CONFIG();
     ESP_ERROR_CHECK(esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus));
     
-    // Create DBI IO handle for DSI using official ST7703 macro
+    // ==========================================
+    // Step 5: Create DBI IO handle for DSI
+    // ==========================================
     ESP_LOGI(TAG, "Install DBI panel IO");
     esp_lcd_panel_io_handle_t io_handle = NULL;
     esp_lcd_dbi_io_config_t dbi_config = ST7703_PANEL_IO_DBI_CONFIG();
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &io_handle));
     
-    // Create ST7703 panel with DMA2D and double-buffering for tear-free display
-    ESP_LOGI(TAG, "Install LCD driver of st7703 (DMA2D enabled, double-buffering)");
+    // ==========================================
+    // Step 6: Create ST7703 panel with double-buffering
+    // ==========================================
+    ESP_LOGI(TAG, "Install LCD driver of st7703 (double-buffering for avoid_tearing)");
     esp_lcd_dpi_panel_config_t dpi_config = ST7703_720_720_PANEL_60HZ_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
     
-    // Enable DMA2D-assisted framebuffer transfer with double buffering
-    // num_fbs=2: Double buffering on hardware level prevents tearing
-    // use_dma2d=true: Use 2D-DMA for efficient buffer transfers (already set in macro)
-    dpi_config.num_fbs = 2;  // Override macro default (1) for tear-free operation
+    // CRITICAL: num_fbs=2 required for avoid_tearing mode
+    dpi_config.num_fbs = 2;
     
     st7703_vendor_config_t vendor_config = {
         .flags = {
@@ -198,12 +131,47 @@ esp_err_t lvgl_port_init(void)
     
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7703(io_handle, &panel_config, &panel_handle));
     
+    // ==========================================
+    // Step 7: Reset and initialize LCD panel
+    // ==========================================
     ESP_LOGI(TAG, "Reset and initialize LCD panel");
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
     
-    // Initialize I2C for touch
+    // ==========================================
+    // Step 8: Add display to ESP-BSP LVGL port (with avoid_tearing!)
+    // ==========================================
+    ESP_LOGI(TAG, "Add MIPI-DSI display to LVGL with avoid_tearing enabled");
+    
+    const lvgl_port_display_cfg_t disp_cfg = {
+        .panel_handle = panel_handle,
+        .buffer_size = LCD_H_RES * LCD_V_RES,
+        .double_buffer = true,
+        .hres = LCD_H_RES,
+        .vres = LCD_V_RES,
+        .color_format = LV_COLOR_FORMAT_RGB565,
+        .flags = {
+            .full_refresh = true,  // Redraw entire screen each frame (clears old pixels)
+        },
+    };
+    
+    const lvgl_port_display_dsi_cfg_t dsi_cfg = {
+        .flags = {
+            .avoid_tearing = true,  // KEY: Enable VSync-based tearing prevention!
+        },
+    };
+    
+    lvgl_disp = lvgl_port_add_disp_dsi(&disp_cfg, &dsi_cfg);
+    if (lvgl_disp == NULL) {
+        ESP_LOGE(TAG, "Failed to add MIPI-DSI display to LVGL");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "LVGL display added with avoid_tearing mode");
+    
+    // ==========================================
+    // Step 9: Initialize I2C for touch
+    // ==========================================
     ESP_LOGI(TAG, "Initialize I2C for touch");
     i2c_master_bus_config_t i2c_bus_config = {
         .i2c_port = TOUCH_I2C_NUM,
@@ -217,7 +185,9 @@ esp_err_t lvgl_port_init(void)
     i2c_master_bus_handle_t i2c_bus_handle;
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_config, &i2c_bus_handle));
     
-    // Initialize touch controller using the official GT911 pattern
+    // ==========================================
+    // Step 10: Initialize touch controller GT911
+    // ==========================================
     ESP_LOGI(TAG, "Initialize touch controller GT911");
     
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
@@ -225,7 +195,6 @@ esp_err_t lvgl_port_init(void)
     tp_io_config.scl_speed_hz = 400000;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus_handle, &tp_io_config, &tp_io_handle));
     
-    // GT911 driver configuration
     esp_lcd_touch_io_gt911_config_t gt911_config = {
         .dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS,
     };
@@ -255,56 +224,41 @@ esp_err_t lvgl_port_init(void)
     }
     ESP_LOGI(TAG, "GT911 touch controller initialized successfully");
     
-    // Create LVGL display (720x720)
-    ESP_LOGI(TAG, "Create LVGL display");
-    lvgl_disp = lv_display_create(LCD_H_RES, LCD_V_RES);
-    lv_display_set_flush_cb(lvgl_disp, lvgl_flush_cb);
-    lv_display_set_user_data(lvgl_disp, panel_handle);
+    // ==========================================
+    // Step 11: Add touch to ESP-BSP LVGL port
+    // ==========================================
+    ESP_LOGI(TAG, "Add touch input device to LVGL");
     
-    // Get DPI panel's internal framebuffers - avoid extra PSRAM allocation
-    void *fb0 = NULL;
-    void *fb1 = NULL;
-    ESP_ERROR_CHECK(esp_lcd_dpi_panel_get_frame_buffer(panel_handle, 2, &fb0, &fb1));
-    
-    size_t buffer_size = LCD_H_RES * LCD_V_RES * sizeof(lv_color16_t);
-    ESP_LOGI(TAG, "Using DPI panel framebuffers: fb0=%p, fb1=%p, size=%zu bytes", 
-             fb0, fb1, buffer_size);
-    
-    // FULL mode: entire screen redrawn each frame - no ghosting, stable rendering
-    // Double-buffering: tear-free display, one buffer displayed while other is drawn
-    lv_display_set_buffers(lvgl_disp, fb0, fb1, buffer_size, LV_DISPLAY_RENDER_MODE_FULL);
-    
-    ESP_LOGI(TAG, "LVGL display initialized with FULL mode (double-buffered)");
-    
-    // Create LVGL input device (touch)
-    ESP_LOGI(TAG, "Create LVGL input device");
-    lvgl_touch_indev = lv_indev_create();
-    lv_indev_set_type(lvgl_touch_indev, LV_INDEV_TYPE_POINTER);
-    lv_indev_set_read_cb(lvgl_touch_indev, lvgl_touch_cb);
-    lv_indev_set_user_data(lvgl_touch_indev, touch_handle);
-    
-    // Create and start LVGL tick timer
-    const esp_timer_create_args_t lvgl_tick_timer_args = {
-        .callback = &lvgl_tick_timer_cb,
-        .name = "lvgl_tick"
+    const lvgl_port_touch_cfg_t touch_cfg = {
+        .disp = lvgl_disp,
+        .handle = touch_handle,
     };
-    esp_timer_handle_t lvgl_tick_timer = NULL;
-    ESP_ERROR_CHECK(esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_tick_timer, LVGL_TICK_PERIOD_MS * 1000));
     
-    // Create LVGL task pinned to Core 1 (Core 0 is used by main task and system)
-    xTaskCreatePinnedToCore(lvgl_port_task, "LVGL", LVGL_TASK_STACK_SIZE, NULL, LVGL_TASK_PRIORITY, NULL, 1);
+    lvgl_touch_indev = lvgl_port_add_touch(&touch_cfg);
+    if (lvgl_touch_indev == NULL) {
+        ESP_LOGE(TAG, "Failed to add touch input device");
+        return ESP_FAIL;
+    }
     
-    ESP_LOGI(TAG, "LVGL initialization complete (running on Core 1)");
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "LVGL initialization complete!");
+    ESP_LOGI(TAG, "  - Display: %dx%d MIPI-DSI", LCD_H_RES, LCD_V_RES);
+    ESP_LOGI(TAG, "  - Mode: avoid_tearing (VSync synchronized)");
+    ESP_LOGI(TAG, "  - Double buffering: enabled");
+    ESP_LOGI(TAG, "  - Touch: GT911");
+    ESP_LOGI(TAG, "========================================");
+    
     return ESP_OK;
 }
 
-lv_display_t *lvgl_port_get_display(void)
+lv_display_t *lvgl_display_get_display(void)
 {
     return lvgl_disp;
 }
 
-lv_indev_t *lvgl_port_get_indev(void)
+lv_indev_t *lvgl_display_get_indev(void)
 {
     return lvgl_touch_indev;
 }
+
+/* Note: lvgl_port_lock and lvgl_port_unlock are now provided by esp_lvgl_port library */
