@@ -17,15 +17,57 @@
 #include "lvgl_port.h"
 #include "lvgl__lvgl/src/widgets/lottie/lv_lottie.h"
 
-// External Lottie data from circle_lottie.c
+// External Lottie data
 extern const uint8_t circle_lottie_data[];
 extern const uint32_t circle_lottie_data_size;
+extern const uint8_t cute_bird_lottie_data[];
+extern const uint32_t cute_bird_lottie_data_size;
 
 #if CONFIG_LV_USE_SYSMON
 #include "lvgl__lvgl/src/others/sysmon/lv_sysmon.h"
 #endif
 
 static const char *TAG = "main";
+
+// Lottie buffer dimensions - change here to adjust size
+static const size_t LOTTIE_BUFFER_DIM = 300;
+
+// Global state for animation switching
+static lv_obj_t *g_lottie_obj = NULL;
+static void *g_lottie_buf = NULL;
+static bool g_is_cute_bird = false;  // false = circle, true = cute_bird
+
+// Touch event callback to switch animations
+static void touch_event_cb(lv_event_t *e)
+{
+    if (g_lottie_obj == NULL || g_lottie_buf == NULL) {
+        ESP_LOGE(TAG, "Lottie object or buffer not initialized");
+        return;
+    }
+    
+    // Delete old Lottie object
+    lv_obj_delete(g_lottie_obj);
+    
+    // Toggle animation
+    g_is_cute_bird = !g_is_cute_bird;
+    
+    // Create new Lottie object
+    lv_obj_t *scr = lv_screen_active();
+    g_lottie_obj = lv_lottie_create(scr);
+    lv_obj_set_size(g_lottie_obj, LOTTIE_BUFFER_DIM, LOTTIE_BUFFER_DIM);
+    lv_obj_center(g_lottie_obj);
+    
+    // Load animation data
+    if (g_is_cute_bird) {
+        ESP_LOGI(TAG, "Switching to cute_bird animation");
+        lv_lottie_set_buffer(g_lottie_obj, LOTTIE_BUFFER_DIM, LOTTIE_BUFFER_DIM, g_lottie_buf);
+        lv_lottie_set_src_data(g_lottie_obj, (const char*)cute_bird_lottie_data, cute_bird_lottie_data_size);
+    } else {
+        ESP_LOGI(TAG, "Switching to circle animation");
+        lv_lottie_set_buffer(g_lottie_obj, LOTTIE_BUFFER_DIM, LOTTIE_BUFFER_DIM, g_lottie_buf);
+        lv_lottie_set_src_data(g_lottie_obj, (const char*)circle_lottie_data, circle_lottie_data_size);
+    }
+}
 
 void app_main(void)
 {
@@ -76,24 +118,31 @@ void app_main(void)
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x003a57), LV_PART_MAIN);
     
-    // Create Lottie object and set larger size
-    lv_obj_t *lottie_obj = lv_lottie_create(scr);
-    lv_obj_set_size(lottie_obj, 300, 300);
-    lv_obj_center(lottie_obj);
+    // Create Lottie object
+    g_lottie_obj = lv_lottie_create(scr);
+    lv_obj_set_size(g_lottie_obj, LOTTIE_BUFFER_DIM, LOTTIE_BUFFER_DIM);
+    lv_obj_center(g_lottie_obj);
     
-    size_t buf_size = 300 * 300 * 4;  // RGBA format
-    void *lottie_buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
-    if (!lottie_buf) {
+    // Add touch event handler to screen
+    lv_obj_add_event_cb(scr, touch_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_flag(scr, LV_OBJ_FLAG_CLICKABLE);
+    
+    size_t buf_size = LOTTIE_BUFFER_DIM * LOTTIE_BUFFER_DIM * 4;  // RGBA format
+    g_lottie_buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    if (!g_lottie_buf) {
         ESP_LOGE(TAG, "Failed to allocate Lottie buffer");
         lvgl_port_unlock();
         return;
     }
     
-    ESP_LOGI(TAG, "Allocated %zu bytes for full-screen Lottie buffer in PSRAM", buf_size);
+    ESP_LOGI(TAG, "Allocated %zu bytes for Lottie buffer in PSRAM", buf_size);
     
-    // Set buffer and load circle Lottie animation
-    lv_lottie_set_buffer(lottie_obj, 300, 300, lottie_buf);
-    lv_lottie_set_src_data(lottie_obj, (const char*)circle_lottie_data, circle_lottie_data_size);
+    // Set buffer and load circle Lottie animation (initial)
+    lv_lottie_set_buffer(g_lottie_obj, LOTTIE_BUFFER_DIM, LOTTIE_BUFFER_DIM, g_lottie_buf);
+    lv_lottie_set_src_data(g_lottie_obj, (const char*)circle_lottie_data, circle_lottie_data_size);
+    g_is_cute_bird = false;  // Start with circle
+    
+    ESP_LOGI(TAG, "Touch the screen to switch between animations!");
     
     lvgl_port_unlock();
     
