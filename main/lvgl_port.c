@@ -50,17 +50,13 @@ void lvgl_port_unlock(void)
     xSemaphoreGiveRecursive(lvgl_mux);
 }
 
-// LVGL Flush Callback - Must explicitly draw to MIPI DSI panel!
+// LVGL Flush Callback - FULL mode: entire screen is redrawn each frame
 static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
     esp_lcd_panel_handle_t panel = lv_display_get_user_data(disp);
-    const int x1 = area->x1;
-    const int y1 = area->y1;
-    const int x2 = area->x2 + 1;  // Exclusive end coordinate
-    const int y2 = area->y2 + 1;  // Exclusive end coordinate
     
-    // Draw bitmap to the panel
-    esp_lcd_panel_draw_bitmap(panel, x1, y1, x2, y2, px_map);
+    // FULL mode: draw the entire buffer to panel (area covers full screen)
+    esp_lcd_panel_draw_bitmap(panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, px_map);
     
     lv_display_flush_ready(disp);
 }
@@ -264,25 +260,19 @@ esp_err_t lvgl_port_init(void)
     lv_display_set_flush_cb(lvgl_disp, lvgl_flush_cb);
     lv_display_set_user_data(lvgl_disp, panel_handle);
     
-    // Use full-screen buffers in PSRAM for FULL rendering mode (no partial updates)
-    // Full screen: 720x720 pixels * 2 bytes = 1,036,800 bytes per buffer
+    // Get DPI panel's internal framebuffers - avoid extra PSRAM allocation
+    void *fb0 = NULL;
+    void *fb1 = NULL;
+    ESP_ERROR_CHECK(esp_lcd_dpi_panel_get_frame_buffer(panel_handle, 2, &fb0, &fb1));
+    
     size_t buffer_size = LCD_H_RES * LCD_V_RES * sizeof(lv_color16_t);
-    ESP_LOGI(TAG, "Allocating LVGL full-screen buffers: %zu bytes per buffer (%.2f MB total)", 
-             buffer_size, (buffer_size * 2) / (1024.0f * 1024.0f));
+    ESP_LOGI(TAG, "Using DPI panel framebuffers: fb0=%p, fb1=%p, size=%zu bytes", 
+             fb0, fb1, buffer_size);
     
-    // CRITICAL: Use aligned allocation! LV_DRAW_BUF_ALIGN is 64 bytes.
-    // heap_caps_malloc does NOT guarantee alignment, causing LVGL assertion loops.
-    void *buf1 = heap_caps_aligned_alloc(64, buffer_size, MALLOC_CAP_SPIRAM);
-    assert(buf1);
-    void *buf2 = heap_caps_aligned_alloc(64, buffer_size, MALLOC_CAP_SPIRAM);
-    assert(buf2);
+    // FULL mode: entire screen redrawn each frame - stable, no tearing
+    lv_display_set_buffers(lvgl_disp, fb0, fb1, buffer_size, LV_DISPLAY_RENDER_MODE_FULL);
     
-    ESP_LOGI(TAG, "LVGL buffers allocated in PSRAM (64-byte aligned): buf1=%p, buf2=%p", buf1, buf2);
-    
-    // Use the simple API that doesn't do memset - just pass the buffers directly
-    lv_display_set_buffers(lvgl_disp, buf1, buf2, buffer_size, LV_DISPLAY_RENDER_MODE_FULL);
-    
-    ESP_LOGI(TAG, "LVGL display buffers initialized");
+    ESP_LOGI(TAG, "LVGL display initialized with FULL mode");
     
     // Create LVGL input device (touch)
     ESP_LOGI(TAG, "Create LVGL input device");
