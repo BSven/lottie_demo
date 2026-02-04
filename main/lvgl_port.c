@@ -173,9 +173,14 @@ esp_err_t lvgl_port_init(void)
     esp_lcd_dbi_io_config_t dbi_config = ST7703_PANEL_IO_DBI_CONFIG();
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &io_handle));
     
-    // Create ST7703 panel - EXACTLY as test program
-    ESP_LOGI(TAG, "Install LCD driver of st7703");
+    // Create ST7703 panel with DMA2D and double-buffering for tear-free display
+    ESP_LOGI(TAG, "Install LCD driver of st7703 (DMA2D enabled, double-buffering)");
     esp_lcd_dpi_panel_config_t dpi_config = ST7703_720_720_PANEL_60HZ_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
+    
+    // Enable DMA2D-assisted framebuffer transfer with double buffering
+    // num_fbs=2: Double buffering on hardware level prevents tearing
+    // use_dma2d=true: Use 2D-DMA for efficient buffer transfers (already set in macro)
+    dpi_config.num_fbs = 2;  // Override macro default (1) for tear-free operation
     
     st7703_vendor_config_t vendor_config = {
         .flags = {
