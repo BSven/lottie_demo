@@ -1,5 +1,5 @@
 /*
- * LVGL Benchmark Demo for ESP32-P4
+ * LVGL Lottie Animation Demo for ESP32-P4
  */
 
 #include <stdio.h>
@@ -14,10 +14,11 @@
 #include "lvgl.h"
 #include "lvgl_port.h"
 
-/* Include benchmark demo */
-#include "demos/benchmark/lv_demo_benchmark.h"
+/* Lottie animation data */
+extern const uint8_t circle_lottie_data[];
+extern const uint32_t circle_lottie_data_size;
 
-static const char *TAG = "benchmark";
+static const char *TAG = "lottie";
 
 void app_main(void)
 {
@@ -57,19 +58,24 @@ void app_main(void)
     // Give LVGL time to initialize
     vTaskDelay(pdMS_TO_TICKS(100));
     
-    // Start benchmark demo
-    ESP_LOGI(TAG, "Starting LVGL Benchmark Demo...");
+    // Create Lottie animation
+    ESP_LOGI(TAG, "Creating Lottie animation...");
     
     if (!lvgl_port_lock(0)) {
         ESP_LOGE(TAG, "Failed to lock LVGL");
         return;
     }
     
-    lv_demo_benchmark();
+    /* Create Lottie widget */
+    lv_obj_t *lottie = lv_lottie_create(lv_screen_active());
+    lv_lottie_set_src_data(lottie, circle_lottie_data, circle_lottie_data_size);
+    lv_lottie_set_draw_buf(lottie, lv_draw_buf_create(300, 300, LV_COLOR_FORMAT_ARGB8888, LV_STRIDE_AUTO));
+    lv_obj_set_size(lottie, 300, 300);
+    lv_obj_center(lottie);
     
     lvgl_port_unlock();
     
-    ESP_LOGI(TAG, "Benchmark running...");
+    ESP_LOGI(TAG, "Lottie animation running...");
     
     // Keep the app running
     while (1) {
