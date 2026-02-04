@@ -1,6 +1,6 @@
 /*
- * LVGL Lottie Animation Demo
- * Playing cute_bird.json using LVGL's built-in Lottie support
+ * LVGL Benchmark Demo
+ * Running LVGL's built-in benchmark
  */
 
 #include <stdio.h>
@@ -12,62 +12,29 @@
 #include "esp_flash.h"
 #include "esp_system.h"
 #include "esp_log.h"
-#include "esp_heap_caps.h"
 #include "lvgl.h"
 #include "lvgl_port.h"
+#include "demos/lv_demos.h"
 
-/* Include the Lottie animation data */
-#include "assets/cute_bird.c"
+static const char *TAG = "benchmark_demo";
 
-static const char *TAG = "lottie_demo";
-
-/* Lottie animation object */
-static lv_obj_t *lottie_obj = NULL;
-
-/* Buffer for Lottie rendering (ARGB8888 format, 4 bytes per pixel) */
-/* Lottie canvas: 300x300 - allocated in PSRAM due to size */
-#define LOTTIE_WIDTH  300
-#define LOTTIE_HEIGHT 300
-static uint8_t *lottie_buf = NULL;
-
-/* Create Lottie animation */
-static void create_lottie_animation(void)
+/* Callback when benchmark finishes */
+static void benchmark_finished_cb(const lv_demo_benchmark_summary_t *summary)
 {
-    /* Allocate buffer in PSRAM (SPIRAM) due to large size */
-    size_t buf_size = LOTTIE_WIDTH * LOTTIE_HEIGHT * 4;
-    lottie_buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (lottie_buf == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate Lottie buffer in PSRAM");
-        return;
-    }
-    ESP_LOGI(TAG, "Lottie buffer allocated: %d bytes in PSRAM", buf_size);
+    ESP_LOGI(TAG, "=== BENCHMARK FINISHED ===");
+    ESP_LOGI(TAG, "Average FPS: %" PRId32, summary->total_avg_fps);
+    ESP_LOGI(TAG, "Average CPU: %" PRId32 "%%", summary->total_avg_cpu);
+    ESP_LOGI(TAG, "Average Render time: %" PRId32 " ms", summary->total_avg_render_time);
+    ESP_LOGI(TAG, "Average Flush time: %" PRId32 " ms", summary->total_avg_flush_time);
+    ESP_LOGI(TAG, "Valid scenes: %" PRId32, summary->valid_scene_cnt);
     
-    /* Create Lottie widget */
-    lottie_obj = lv_lottie_create(lv_screen_active());
-    
-    /* Set buffer for rendering */
-    lv_lottie_set_buffer(lottie_obj, LOTTIE_WIDTH, LOTTIE_HEIGHT, lottie_buf);
-    
-    /* Set the animation data */
-    lv_lottie_set_src_data(lottie_obj, cute_bird_lottie_data, cute_bird_lottie_data_size);
-    
-    /* Center on screen */
-    lv_obj_center(lottie_obj);
-    
-    /* Get the animation and configure it */
-    lv_anim_t *anim = lv_lottie_get_anim(lottie_obj);
-    if (anim) {
-        lv_anim_set_repeat_count(anim, LV_ANIM_REPEAT_INFINITE);
-    }
-    
-    ESP_LOGI(TAG, "Lottie animation created");
-    ESP_LOGI(TAG, "  Size: %dx%d", LOTTIE_WIDTH, LOTTIE_HEIGHT);
-    ESP_LOGI(TAG, "  Data size: %" PRIu32 " bytes", cute_bird_lottie_data_size);
+    /* Show summary on display */
+    lv_demo_benchmark_summary_display(summary);
 }
 
 void app_main(void)
 {
-    printf("LVGL Pure Animation Demo\\n");
+    printf("LVGL Benchmark Demo\n");
 
     /* Print chip information */
     esp_chip_info_t chip_info;
@@ -103,20 +70,23 @@ void app_main(void)
     // Give LVGL time to initialize
     vTaskDelay(pdMS_TO_TICKS(100));
     
-    // Create Lottie animation
-    ESP_LOGI(TAG, "Creating Lottie animation...");
+    // Start benchmark
+    ESP_LOGI(TAG, "Starting LVGL Benchmark...");
     
     if (!lvgl_port_lock(0)) {
         ESP_LOGE(TAG, "Failed to lock LVGL");
         return;
     }
     
-    /* Create Lottie animation from JSON data */
-    create_lottie_animation();
+    /* Set callback for when benchmark finishes */
+    lv_demo_benchmark_set_end_cb(benchmark_finished_cb);
+    
+    /* Start the benchmark */
+    lv_demo_benchmark();
     
     lvgl_port_unlock();
     
-    ESP_LOGI(TAG, "Lottie animation running...");
+    ESP_LOGI(TAG, "Benchmark running...");
     
     // Keep the app running
     while (1) {

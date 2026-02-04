@@ -153,6 +153,9 @@ esp_err_t lvgl_display_init(void)
         .color_format = LV_COLOR_FORMAT_RGB565,
         .flags = {
             .full_refresh = true,  // Redraw entire screen each frame (clears old pixels)
+            .buff_dma = true,    // Use DMA-capable buffers
+            .buff_spiram = true, // Allocate buffers in PSRAM
+            .sw_rotate = true,   // Use software rotation
         },
     };
     
